@@ -20,6 +20,7 @@ export async function registry(arch: String, request: Request, env: Env, ctx: Ex
       installer: db_data.installer,
       bin: [] as any[],
       core: [] as any[],
+      last_modified: db_rec.last_modified,
     };
     for (const bin of db_data.bin) {
       toolchain.bin.push({
