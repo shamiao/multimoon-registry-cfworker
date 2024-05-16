@@ -60,11 +60,6 @@ export async function update(request: Request, env: Env, ctx: ExecutionContext):
   }
   const data_bytes = (new TextEncoder()).encode(JSON.stringify(data))
 
-  // remove existing toolchain entry in D1
-  const sql_rm = await env.REG_DB.prepare("DELETE FROM toolchains WHERE arch = ? AND name = ?")
-    .bind(req.arch, req.name)
-    .run();
-
   // upload files to R2
   const uploaded = [] as any[]
   for (const file of req.toolchain.bin) {
@@ -84,9 +79,23 @@ export async function update(request: Request, env: Env, ctx: ExecutionContext):
 
   // save new entry in D1
   const timestamp = Math.floor(Date.now() / 1000);
-  await env.REG_DB.prepare("INSERT INTO toolchains (arch, name, last_modified, data) VALUES (?, ?, ?, ?) ")
-    .bind(req.arch, req.name, timestamp, data_bytes)
-    .run();
+  // find existing toolchain entry in D1
+  const query = await env.REG_DB.prepare("SELECT * FROM toolchains WHERE arch = ? AND name = ?")
+    .bind(req.arch, req.name)
+    .all();
+  if (!query.success) { return new Response("server internal error (database error)\n", { status: 500 }); }
+  const shouldInsert = (query.results.length == 0)
+  let queryInsertUpdate;
+  if (shouldInsert) {
+    queryInsertUpdate = env.REG_DB
+      .prepare("INSERT INTO toolchains (arch, name, last_modified, data) VALUES (?, ?, ?, ?) ")
+      .bind(req.arch, req.name, timestamp, data_bytes)
+  } else {
+    queryInsertUpdate = env.REG_DB
+      .prepare("UPDATE toolchains SET last_modified = ?, data = ? WHERE arch = ? AND name = ?")
+      .bind(timestamp, data_bytes, req.arch, req.name)
+  }
+  await queryInsertUpdate.run();
 
   const rep = UpdateRep.create();
   return new Response(UpdateRep.encode(rep).finish());
