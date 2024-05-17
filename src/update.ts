@@ -28,10 +28,11 @@ export async function update(request: Request, env: Env, ctx: ExecutionContext):
     return new Response("bad request (missing fields)\n", { status: 400 });
   }
 
-  const data = {
-    installer: req.toolchain.installer,
-    bin: [] as any[],
-    core: [] as any[],
+  {
+    const q = await env.REG_DB.prepare("DELETE FROM files WHERE arch = ? AND toolchain = ?")
+      .bind(req.arch, req.toolchain.name)
+      .run();
+    if (!q.success) { return new Response("server internal error (database error)\n", { status: 500 }); }
   }
   for (const file of req.toolchain.bin) {
     // COMMENT OUT NOTE: 
@@ -44,21 +45,22 @@ export async function update(request: Request, env: Env, ctx: ExecutionContext):
     // await stream.promises.pipeline(xz_stream, hasher)
     // console.log(file.filename, hasher.digest('hex'))
 
-    data.bin.push({
-      filename: file.filename,
-      downloadfrom: file.downloadfrom,
-      checksum: file.checksum,
-    })
+    const q = await env.REG_DB
+      .prepare("INSERT INTO files (`type`, `toolchain`, `arch`, `filename`, `downloadname`, `checksum`) " + 
+        "VALUES (?, ?, ?, ?, ?, ?)")
+      .bind('bin', req.toolchain.name, req.arch, file.filename, file.downloadfrom, file.checksum)
+      .run();
+    if (!q.success) { return new Response("server internal error (database error)\n", { status: 500 }); }
   }
   {
     const file = req.toolchain.core[0]
-    data.core.push({
-      filename: file.filename,
-      downloadfrom: file.downloadfrom,
-      checksum: file.checksum,
-    })
+    const q = await env.REG_DB
+      .prepare("INSERT INTO files (`type`, `toolchain`, `arch`, `filename`, `downloadname`, `checksum`) " + 
+        "VALUES (?, ?, ?, ?, ?, ?)")
+      .bind('core', req.toolchain.name, req.arch, file.filename, file.downloadfrom, file.checksum)
+      .run();
+    if (!q.success) { return new Response("server internal error (database error)\n", { status: 500 }); }
   }
-  const data_bytes = (new TextEncoder()).encode(JSON.stringify(data))
 
   // upload files to R2
   const uploaded = [] as any[]
@@ -75,7 +77,6 @@ export async function update(request: Request, env: Env, ctx: ExecutionContext):
       uploaded.push(await env.REG_BUCKET.put(key, file.uploadContent));
     }
   }
-  // console.log(uploaded)
 
   // save new entry in D1
   const timestamp = Math.floor(Date.now() / 1000);
@@ -88,12 +89,12 @@ export async function update(request: Request, env: Env, ctx: ExecutionContext):
   let queryInsertUpdate;
   if (shouldInsert) {
     queryInsertUpdate = env.REG_DB
-      .prepare("INSERT INTO toolchains (arch, name, last_modified, data) VALUES (?, ?, ?, ?) ")
-      .bind(req.arch, req.name, timestamp, data_bytes)
+      .prepare("INSERT INTO toolchains (arch, name, moonver, installer, last_modified) VALUES (?, ?, ?, ?) ")
+      .bind(req.arch, req.name, req.toolchain.moonver, req.toolchain.installer, timestamp)
   } else {
     queryInsertUpdate = env.REG_DB
-      .prepare("UPDATE toolchains SET last_modified = ?, data = ? WHERE arch = ? AND name = ?")
-      .bind(timestamp, data_bytes, req.arch, req.name)
+      .prepare("UPDATE toolchains SET last_modified = ?, moonver = ?, installer = ? WHERE arch = ? AND name = ?")
+      .bind(timestamp, req.toolchain.moonver, req.toolchain.installer, req.arch, req.name)
   }
   await queryInsertUpdate.run();
 
