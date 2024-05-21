@@ -12,7 +12,7 @@
  */
 
 import { registry } from "./registry";
-import { check, update } from "./update";
+import * as update from "./update";
 
 function matches(url: URL, patt: String): Boolean {
 	let patt_use
@@ -35,9 +35,11 @@ async function fetch(request: Request, env: Env, ctx: ExecutionContext): Promise
 	} else if (matches(url, '/windows_x64') && request.method == 'GET') {
 		return await registry('windows_x64', request, env, ctx);
 	} else if (matches(url, '/update/check') && request.method == 'POST') {
-		return await check(request, env, ctx);
+		return await update.check(request, env, ctx);
 	} else if (matches(url, '/update') && request.method == 'POST') {
-		return await update(request, env, ctx);
+		return await update.update(request, env, ctx);
+	} else if (matches(url, '/update/upload') && request.method == 'POST') {
+		return await update.upload_file(request, env, ctx);
 	}
 
 	return new Response("not found\n", { status: 404 });
